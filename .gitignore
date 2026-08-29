@@ -4,4 +4,7 @@ data/
 .venv/
 antigravity_handoff.md
 problem_statement.txt
-
+gcm-diagnose.log
+docs/harmonization_problems.txt
+docs/OceanEmbed — Scientific Dataset Audit & Preprocessing Specification.md
+analysis/

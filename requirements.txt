@@ -3,3 +3,6 @@ cdsapi>=0.7.7
 python-dotenv
 xarray
 cftime
+netcdf4 
+h5netcdf 
+dask

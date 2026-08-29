@@ -11,23 +11,32 @@ os.makedirs(RAW_DIR, exist_ok=True)
 
 print("Resizing on the server side...")
 
-try:
-    copernicusmarine.subset(
-        dataset_id="cmems_mod_glo_phy_my_0.083deg_P1D-m",
-        variables=["uo", "vo"], 
-        minimum_longitude=75.0, maximum_longitude=100.0,
-        minimum_latitude=5.0, maximum_latitude=25.0,
-        start_datetime="2015-01-01T00:00:00",
-        end_datetime="2022-12-31T23:59:59",
-        # STRICT BOUNDARY FIX:
-        minimum_depth=0.494025, 
-        maximum_depth=0.495, 
-        coordinates_selection_method="nearest", 
-        output_filename=os.path.join(RAW_DIR, "glorys_surface_currents_2015_2022.nc"),
-        overwrite=True,
-        username=user,
-        password=password
-    )
-    print("SUCCESS! Surface Currents downloaded.")
-except Exception as e:
-    print(f"Failed to download currents: {e}")
+for year in range(2005, 2023):
+    print(f"\n--- Downloading Surface Currents for {year} ---")
+    yearly_file = os.path.join(RAW_DIR, f"glorys_surface_currents_{year}.nc")
+    legacy_file = os.path.join(RAW_DIR, "glorys_surface_currents_2015_2022.nc")
+    
+    if os.path.exists(yearly_file) or (year >= 2015 and os.path.exists(legacy_file)):
+        print(f"Skipping {year}, already downloaded.")
+        continue
+        
+    try:
+        copernicusmarine.subset(
+            dataset_id="cmems_mod_glo_phy_my_0.083deg_P1D-m",
+            variables=["uo", "vo"], 
+            minimum_longitude=75.0, maximum_longitude=100.0,
+            minimum_latitude=5.0, maximum_latitude=25.0,
+            start_datetime=f"{year}-01-01T00:00:00",
+            end_datetime=f"{year}-12-31T23:59:59",
+            # STRICT BOUNDARY FIX:
+            minimum_depth=0.494025, 
+            maximum_depth=0.495, 
+            coordinates_selection_method="nearest", 
+            output_filename=yearly_file,
+            overwrite=True,
+            username=user,
+            password=password
+        )
+        print(f"SUCCESS! Surface Currents downloaded for {year}.")
+    except Exception as e:
+        print(f"Failed to download currents for {year}: {e}")

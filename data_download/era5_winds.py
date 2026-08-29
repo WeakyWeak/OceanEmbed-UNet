@@ -12,7 +12,7 @@ c = cdsapi.Client(
     key=os.getenv("CDS_KEY")
 )
 
-for year in range(2015, 2023):
+for year in range(2005, 2023):
     outfile = os.path.join(RAW_DIR, f'era5_winds_{year}.nc')
     if os.path.exists(outfile):
         print(f"Skipping {year}, already exists.")
