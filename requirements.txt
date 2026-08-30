@@ -6,3 +6,4 @@ cftime
 netcdf4 
 h5netcdf 
 dask
+scipy
