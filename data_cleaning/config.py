@@ -8,7 +8,8 @@ from pathlib import Path
 # ── Paths ────────────────────────────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR      = PROJECT_ROOT / "data" / "raw"
-OUT_DIR      = PROJECT_ROOT / "data" / "processed"
+OUT_DIR      = PROJECT_ROOT / "data" / "processed"    # final outputs
+YEARS_DIR    = OUT_DIR / "years"                      # per-year checkpoint files
 
 ERA5_DIR     = RAW_DIR / "Copernicus_ERA5"
 OISST_DIR    = RAW_DIR / "NOAA_OISST"
@@ -35,29 +36,32 @@ DEPTH_LABELS  = [f"{d}m" for d in TARGET_DEPTHS]
 
 # ── Dataset file patterns ────────────────────────────────────────────────────
 # ERA5: per-year files, hourly, coords = (valid_time, latitude, longitude)
-def era5_files():
-    return sorted(ERA5_DIR.glob("era5_winds_*.nc"))
+def era5_files_for_year(year: int):
+    return sorted(ERA5_DIR.glob(f"era5_winds_{year}.nc"))
 
-# OISST: per-year files, daily, coords = (time, lat, lon)
-def oisst_files():
-    return sorted(OISST_DIR.glob("sst.day.mean.*.nc"))
+def oisst_files_for_year(year: int):
+    return sorted(OISST_DIR.glob(f"sst.day.mean.{year}.nc"))
 
-# GLORYS currents: mixed — one multi-year + per-year files
-def currents_files():
-    return sorted(CURRENTS_DIR.glob("glorys_surface_currents_*.nc"))
+def currents_files_for_year(year: int):
+    # GLORYS currents: 2005-2014 have individual files; 2015-2022 are in the combined file
+    single = sorted(CURRENTS_DIR.glob(f"glorys_surface_currents_{year}.nc"))
+    combined = sorted(CURRENTS_DIR.glob("glorys_surface_currents_2015_2022.nc"))
+    return single if single else combined
 
-# SLA: mixed — one multi-year + per-year files
-def sla_files():
-    return sorted(MARINE_DIR.glob("sla_*.nc"))
+def sla_files_for_year(year: int):
+    single = sorted(MARINE_DIR.glob(f"sla_{year}.nc"))
+    combined = sorted(MARINE_DIR.glob("sla_2015_2022.nc"))
+    return single if single else combined
 
-# SSS: mixed — one multi-year + per-year files
-def sss_files():
-    return sorted(MARINE_DIR.glob("sss_*.nc"))
+def sss_files_for_year(year: int):
+    single = sorted(MARINE_DIR.glob(f"sss_{year}.nc"))
+    combined = sorted(MARINE_DIR.glob("sss_2015_2022.nc"))
+    return single if single else combined
 
-# GLORYS thetao: per-depth, each depth has multi-year + per-year files
-def thetao_files(depth_label: str):
-    """Return all files for one depth level, e.g. '0m', '100m'."""
-    return sorted(MARINE_DIR.glob(f"glorys_thetao_{depth_label}_*.nc"))
+def thetao_files_for_year(depth_label: str, year: int):
+    single = sorted(MARINE_DIR.glob(f"glorys_thetao_{depth_label}_{year}.nc"))
+    combined = sorted(MARINE_DIR.glob(f"glorys_thetao_{depth_label}_2015_2022.nc"))
+    return single if single else combined
 
 
 # ── Variable names per dataset ───────────────────────────────────────────────
