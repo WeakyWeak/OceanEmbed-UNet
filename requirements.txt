@@ -1,5 +1,7 @@
 tensorflow[and-cuda]
 keras-tuner
+scikit-learn
+tensorboard
 
 cdsapi
 copernicusmarine
