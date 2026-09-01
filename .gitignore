@@ -8,3 +8,4 @@ gcm-diagnose.log
 docs/harmonization_problems.txt
 docs/OceanEmbed — Scientific Dataset Audit & Preprocessing Specification.md
 analysis/
+OceanEmbed_TensorFlow_UNet_Bayesian_Optimization_spec.txt
