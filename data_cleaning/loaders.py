@@ -1,6 +1,4 @@
 """
-Step 1–3: Load, decode, coordinate-harmonize every dataset.
-
 Two loading modes:
   - load_year_*()  →  load ONE year's data (used by year-by-year pipeline)
   - The helpers below can also be used to load mask-generation data.
