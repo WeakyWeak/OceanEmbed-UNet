@@ -10,9 +10,10 @@ Each loader returns a lazy xarray DataArray/Dataset with:
 """
 import xarray as xr
 import numpy as np
+import grid as G
 from config import (
     VARS, TARGET_DEPTHS, DEPTH_LABELS,
-    era5_files_for_year, oisst_files_for_year, currents_files_for_year,
+    oisst_files_for_year,
     sla_files_for_year, sss_files_for_year, thetao_files_for_year,
 )
 
@@ -51,19 +52,6 @@ def _sel_year(da: xr.DataArray, year: int) -> xr.DataArray:
 
 # ── Per-year loaders ──────────────────────────────────────────────────────────
 
-def load_era5_year(year: int):
-    """ERA5 u10/v10, one calendar year, hourly, lat ascending."""
-    v = VARS["era5"]
-    files = era5_files_for_year(year)
-    if not files:
-        raise FileNotFoundError(f"No ERA5 file for {year}")
-    ds = xr.open_mfdataset(files, chunks={"valid_time": 24},
-                           combine="by_coords")
-    ds = _rename_coords(ds, v["lat"], v["lon"], v["time"])
-    ds = _sort_lat(ds)
-    return ds[v["u10"]], ds[v["v10"]]
-
-
 def load_oisst_year(year: int):
     """OISST sst, one calendar year, daily, BoB-padded subset."""
     v = VARS["oisst"]
@@ -72,39 +60,39 @@ def load_oisst_year(year: int):
         raise FileNotFoundError(f"No OISST file for {year}")
     ds = xr.open_mfdataset(files, chunks={"time": 365}, combine="by_coords")
     ds = _rename_coords(ds, v["lat"], v["lon"], v["time"])
-    ds = ds.sel(lat=slice(4.5, 25.5), lon=slice(74.5, 100.5))
+    # Was hardcoded to slice(4.5, 25.5), slice(74.5, 100.5) - a SECOND
+    # declaration of the domain, independent of the grid module, which stayed
+    # at the Bay of Bengal when the box widened. OISST files are global, so
+    # this silently cropped the Arabian Sea back off after it was downloaded.
+    ds = ds.sel(lat=slice(G.DL_LAT_MIN, G.DL_LAT_MAX),
+                lon=slice(G.DL_LON_MIN, G.DL_LON_MAX))
     sst = ds[v["sst"]]
     if "zlev" in sst.dims:
         sst = sst.isel(zlev=0, drop=True)
     return sst
 
 
-def load_currents_year(year: int):
-    """GLORYS uo/vo, one calendar year, daily, surface-only."""
-    v = VARS["currents"]
-    files = currents_files_for_year(year)
-    if not files:
-        raise FileNotFoundError(f"No GLORYS currents file for {year}")
-    ds = xr.open_mfdataset(files, chunks={"time": 365}, combine="by_coords")
-    ds = _rename_coords(ds, v["lat"], v["lon"], v["time"])
-    uo = _squeeze_depth(ds[v["uo"]])
-    vo = _squeeze_depth(ds[v["vo"]])
-    # When using the combined 2015-2022 file, select only the target year
-    uo = _sel_year(uo, year)
-    vo = _sel_year(vo, year)
-    return uo, vo
-
-
 def load_sla_year(year: int):
-    """Copernicus SLA, one calendar year, daily."""
+    """DUACS L4 altimetry: sla, ugos, vgos - one calendar year, daily.
+
+    ugos/vgos are geostrophic velocity computed by DUACS from the altimetric
+    SSH field. They live in the same file as sla and replace the GLORYS uo/vo
+    that the satellite-only revision removed, so there is no separate currents
+    source any more.
+    """
     v = VARS["sla"]
     files = sla_files_for_year(year)
     if not files:
         raise FileNotFoundError(f"No SLA file for {year}")
     ds = xr.open_mfdataset(files, chunks={"time": 365}, combine="by_coords")
     ds = _rename_coords(ds, v["lat"], v["lon"], v["time"])
-    sla = ds[v["sla"]]
-    return _sel_year(sla, year)
+    missing = [k for k in ("sla", "ugos", "vgos") if v[k] not in ds]
+    if missing:
+        raise KeyError(
+            f"SLA file for {year} lacks {missing}. It predates the "
+            f"satellite-only revision - re-run "
+            f"data_download/fetch_cmems.py --products sla")
+    return tuple(_sel_year(ds[v[k]], year) for k in ("sla", "ugos", "vgos"))
 
 
 def load_sss_year(year: int):
