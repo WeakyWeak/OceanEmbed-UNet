@@ -1,10 +1,37 @@
+# Secrets, environments, caches
 .env
-__pycache__/
-data/
 .venv/
-antigravity_handoff.md
-problem_statement.txt
+__pycache__/
+.vscode/
+logs/
 gcm-diagnose.log
+
+# Data and large artifacts
+data/
+training/arrays*/
+*.keras
+release/
+
+# Trained runs: keep only served runs' small metadata
+training/runs/*
+!training/runs/v3_primary_best/
+!training/runs/v3_att_best/
+training/runs/v3_*_best/*
+!training/runs/v3_*_best/run_config.json
+!training/runs/v3_*_best/metrics_val.*
+!training/runs/v3_*_best/history.csv
+
+# Frontend build output
+frontend/node_modules/
+frontend/dist/
+
+# Internal notes and documents
+handoff.txt
+questions.txt
+EXPANSION_PLAN.txt
+RUNBOOK_V3.txt
+subsurface_temp_exp.md
+*.pptx
 docs/harmonization_problems.txt
 docs/OceanEmbed — Scientific Dataset Audit & Preprocessing Specification.md
 analysis/

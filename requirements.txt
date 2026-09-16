@@ -1,28 +1,36 @@
-tensorflow[and-cuda]
-keras-tuner
-scikit-learn
-tensorboard
+# OceanEmbed - satellite-only subsurface ocean temperature reconstruction
+#
+#   python3 -m venv .venv
+#   .venv/bin/pip install -r requirements.txt
+#
+# Built and tested on Python 3.13.
+#
+# GPU: tensorflow[and-cuda] pulls the CUDA runtime wheels with it. For a
+# CPU-only machine swap it for plain `tensorflow` - every script still runs,
+# training is just far slower. Inference for the demo is fine on CPU.
 
-cdsapi
-copernicusmarine
-ecmwf-datastores-client
-python-cmr
-pystac
+# --- model ---------------------------------------------------------------
+tensorflow[and-cuda]==2.21.0
+keras==3.15.1
+keras-tuner==1.4.8
+scikit-learn==1.9.0        # PCA + k-means, used only to FIT the latent basis;
+                           # serving re-implements the projection in numpy
 
-xarray
-cf_xarray
-netCDF4
-h5netcdf
-zarr
-dask
-pandas
-numpy
-scipy
-shapely
+# --- numerics and NetCDF -------------------------------------------------
+numpy==2.5.2
+pandas==3.0.5
+scipy==1.18.1
+xarray==2026.7.0
+netCDF4==1.7.4
+dask==2026.8.0             # required: loaders.py opens the raw files with
+                           # open_mfdataset(chunks=...) so a year streams
+                           # instead of loading whole
 
-s3fs
-boto3
+# --- data download -------------------------------------------------------
+copernicusmarine==2.4.1    # GLORYS thetao, DUACS SLA+currents, Multi-Obs SSS
+requests==2.34.2           # NOAA OISST, and the Argo GDAC files
+python-dotenv==1.2.3       # reads CMEMS credentials from .env
 
-python-dotenv
-tqdm
-pqdm
+# --- serving -------------------------------------------------------------
+fastapi==0.141.1
+uvicorn==0.52.4
