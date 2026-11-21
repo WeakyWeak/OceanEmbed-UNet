@@ -20,6 +20,11 @@ training/runs/v3_*_best/*
 !training/runs/v3_*_best/run_config.json
 !training/runs/v3_*_best/metrics_val.*
 !training/runs/v3_*_best/history.csv
+!training/runs/v3_rm_primary/
+!training/runs/v3_rm_att/
+training/runs/v3_rm_*/*
+!training/runs/v3_rm_*/run_config.json
+!training/runs/v3_rm_*/history.csv
 
 # Frontend build output
 frontend/node_modules/
