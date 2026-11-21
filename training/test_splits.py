@@ -1,5 +1,21 @@
 #!/usr/bin/env python3
 
+"""
+Checks for training/splits.py. Run before and after the split migration.
+
+    .venv/bin/python training/test_splits.py
+
+The load-bearing test is EQUIVALENCE: split mode "legacy" must reproduce the
+old SPLIT_RANGES index sets exactly, on the current record. That is what lets
+the split machinery be swapped in without disturbing the deployed models, the
+backend, or any published metric.
+
+The other tests are the ones that catch the leakage failure modes the old
+range-based logic allowed - most importantly that membership is decided by SET
+MEMBERSHIP and not by a min/max range, because on a non-contiguous split a
+range test happily accepts training indices as validation.
+"""
+
 import sys
 from pathlib import Path
 

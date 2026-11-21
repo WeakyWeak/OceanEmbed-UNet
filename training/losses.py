@@ -1,3 +1,31 @@
+"""
+Masked data loss, depth-gated physics loss, and the reported metrics.
+
+The NaN-gradient trap (spec section 3.3)
+----------------------------------------
+Do NOT write  ops.where(valid, (y_true - y_pred)**2, 0.0)  with NaN still in
+y_true. where() propagates gradients through BOTH branches, so the forward loss
+looks finite while the gradients are NaN. It fails silently.
+
+The fix lives in the data layer: Y.npy is stored with NaN already replaced by
+0.0 and validity carried separately in target_mask.npy. Every tensor reaching
+these functions is finite, so the masks below are plain multiplications. Every
+denominator is guarded with maximum(..., 1.0).
+
+Anomaly mode
+------------
+The model outputs 15 channels: the NORMALISED ANOMALY at each depth.
+y_true carries 30: [anomaly target | climatology in physical degC].
+
+    absolute_degC = clim_degC + phys_scale * anomaly + phys_offset
+
+The data loss uses only y_true[..., :15]. The physics loss rebuilds absolute
+temperature first, because vertical ordering is a statement about ABSOLUTE
+temperature - comparing anomalies between depths is meaningless.
+
+Legacy absolute mode (anomaly_mode=False) keeps the original behaviour so the
+pre-anomaly runs in training/runs/ can still be evaluated.
+"""
 import sys
 from pathlib import Path
 

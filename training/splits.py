@@ -1,3 +1,50 @@
+"""
+Train / val / test membership, defined by CALENDAR YEAR rather than by index.
+
+Why this replaces SPLIT_RANGES
+------------------------------
+SPLIT_RANGES was a dict of contiguous (start, stop) index tuples, which forces
+the held-out period to be one unbroken block at a fixed position. Two things
+made that untenable:
+
+1. The record is about to run 1993-2024 instead of 2005-2022, so every index
+   in a hardcoded range changes meaning.
+2. The domain-mean subsurface anomaly carries a +0.86 degC/decade warming
+   trend that explains ~87% of its variance. Whether the held-out years sit at
+   the END of the record (the model must EXTRAPOLATE that trend) or are spread
+   through it (the model INTERPOLATES) is a real experimental choice, and it
+   should be a switch rather than a decision baked into an index tuple.
+
+So membership is expressed as years, and indices are derived from the actual
+date array. Nothing here hardcodes a record length.
+
+The leakage trade, stated plainly
+---------------------------------
+Interleaved holdout is leakier than chronological. A test year sitting between
+two training years shares low-frequency ocean state with its neighbours -
+ENSO and IOD run 12-18 months, and subsurface heat content has multi-year
+memory. BUFFER_DAYS drops training days either side of each held-out year,
+which removes the most egregious near-duplicates but cannot remove the shared
+low-frequency state; the anomaly e-folding time is 85-307 days by depth, and
+buffering that far would consume the record.
+
+Chronological is therefore the default: it is the honest harder test, it is
+what a reviewer expects, and expanding the record to 28 training years already
+defuses most of the trend-extrapolation penalty that motivated interleaving.
+
+Run both and report both. The gap between them is the measurement of how much
+the interleaved number owes to temporal leakage.
+
+A note on lag history, which is NOT a problem
+---------------------------------------------
+X.npy is one contiguous record and the lag stack reads it by ABSOLUTE index,
+independent of split membership. A validation sample on 1 January reads its
+t-7 input from late December of a training year. Those are PAST SURFACE
+OBSERVATIONS, never targets, so this is legitimate - and it is exactly what
+the existing 2021/2022 chronological split already does. The only real
+constraint is the global one: a sample needs `max_lag` days of record in front
+of it, which is why every accessor takes max_lag.
+"""
 from __future__ import annotations
 
 import sys

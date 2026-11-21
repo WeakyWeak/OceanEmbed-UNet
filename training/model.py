@@ -1,3 +1,21 @@
+"""
+Configurable 2D U-Net for surface -> subsurface temperature reconstruction.
+
+The odd-dimension problem, solved once (spec section 2.1)
+---------------------------------------------------------
+81 x 101 is not divisible by 2^depth. Rather than doing per-level shape
+surgery, pad once at the entrance and crop once at the exit:
+
+    ZeroPadding2D(((8,7),(6,5)))  ->  96 x 112
+    ... standard U-Net ...
+    Cropping2D(((8,7),(6,5)))     ->  81 x 101
+
+    96 = 16*6 and 112 = 16*7, so depth 3 (/8) and depth 4 (/16) both divide
+    evenly with no remainder anywhere in the encoder.
+
+A useful side effect: zero padding sets the land_mask channel to 0 in the
+padded border, so the network reads the padding as land - which is correct.
+"""
 import sys
 from pathlib import Path
 
