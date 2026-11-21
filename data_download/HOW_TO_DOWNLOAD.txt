@@ -1,0 +1,247 @@
+================================================================================
+  HOW TO DOWNLOAD THE RAW DATA
+================================================================================
+  Target: lat 5-25 N, lon 50-100 E, 1993-01-01 to 2024-12-15.
+  That is an 81 x 201 grid at 0.25 deg and 11,672 days.
+
+  The v3 models train on the Bay of Bengal only (81 x 101, 75-100 E). That
+  crop happens later, in training/build_arrays.py - it is NOT a separate
+  download. Download once, at the full width.
+
+  Everything here is a SATELLITE OBSERVATION except the GLORYS target.
+  ERA5 winds are gone (fetch_era5.py was deleted): they are atmospheric
+  reanalysis, and the problem statement asks for a reconstruction from
+  satellite observations.
+
+  Total, recommended set: 576 files, roughly 72 GB.
+      544 Copernicus Marine  ~57 GB
+       32 NOAA OISST         ~15 GB, of which ~8.6 GB is already on disk
+  Plus Argo for validation, a few MB per year kept.
+  Expect DAYS, not hours.
+================================================================================
+
+
+--------------------------------------------------------------------------------
+  THE ONE THING TO KNOW
+--------------------------------------------------------------------------------
+
+You can stop any of these at any time and re-run them. Nothing is downloaded
+twice.
+
+A file is only treated as done once it has been OPENED AND VALIDATED - correct
+number of days, grid actually covering the target domain, expected variables
+present. That result is recorded in a sidecar next to the file
+(<name>.nc.ok). The skip logic reads the sidecar, never the .nc.
+
+That matters because the old scripts skipped on filename existence, and this
+change keeps every filename identical while changing every file's contents.
+Re-running the old scripts after widening the box would have silently kept the
+2005-2022 Bay-of-Bengal-only files and produced a mixed-domain dataset with no
+error anywhere.
+
+The sidecar also stores a hash of the request parameters, including the
+bounding box. If the domain or the date range is ever changed again, every
+hash changes, every sidecar goes stale, and everything re-downloads. There is
+no way to forget to invalidate it.
+
+Downloads land on a temporary <name>.part.nc and are only moved into place
+after they validate, so an interrupted transfer can never leave a truncated
+file that later looks complete.
+
+Everything lands under data/raw2/ (Argo is the exception: data/raw/ARGO/).
+
+
+--------------------------------------------------------------------------------
+  WHAT GETS DOWNLOADED, AND WHY
+--------------------------------------------------------------------------------
+
+  PRODUCT            DATASET ID / SOURCE                          FILES   USED AS
+
+  GLORYS thetao      cmems_mod_glo_phy_my_0.083deg_P1D-m           480    target
+                     15 depths x 32 years. The 15-channel training target.
+
+  DUACS L4 SSH       cmems_obs-sl_glo_phy-ssh_my_allsat-           32     input
+                     l4-duacs-0.125deg_P1D
+                     Ships sla AND ugos/vgos in the SAME file. Three of the
+                     five model inputs for one download.
+
+  Multi-Obs SSS      cmems_obs-mob_glo_phy-sss_my_multi_P1D        32     input
+                     Variable is `sos`, carried downstream as `sss`.
+                     Ends 2024-12-15 - this is what pins the record's end.
+
+  NOAA OISST v2      downloads.psl.noaa.gov/.../sst.day.mean.*.nc  32     input
+                     Global files, cropped later. See step 1.
+
+  Argo profiles      data-argo.ifremer.fr/geo/indian_ocean/...     -      validation
+                     In-situ truth, held out of training entirely.
+
+  GLORYS uo/vo       same ID as thetao                             32     OPTIONAL
+                     NOT used by any current model. The v2/v3 models are
+                     satellite-only, and DUACS ugos/vgos replaced these - which
+                     also removed a circularity, since GLORYS currents come from
+                     the same reanalysis run that produces our thetao target.
+                     Skip them unless you are reproducing a v1 experiment.
+
+
+--------------------------------------------------------------------------------
+  RUN THESE, IN THIS ORDER
+--------------------------------------------------------------------------------
+
+0.  LOOK BEFORE YOU LEAP (no network, instant)
+
+        .venv/bin/python data_download/fetch_cmems.py  --dry-run --products thetao sla sss
+        .venv/bin/python data_download/fetch_oisst.py  --dry-run
+
+    Confirms the grid and the file list. Should report 544 and 32.
+    (Adding --products currents makes it 576.)
+
+
+1.  OISST FIRST - it is nearly free (minutes)
+
+        .venv/bin/python data_download/fetch_oisst.py
+
+    These files are GLOBAL; the old download never subsetted them, so the
+    domain change does not invalidate them. The 18 years you already have are
+    hard-linked into raw2 and re-validated, and only 1993-2004 and 2023-2024
+    are actually fetched. ~8.6 GB and several hours saved.
+
+    Hard links cost no extra disk. If it says "copy" instead, data/raw and
+    data/raw2 are on different filesystems and it will use ~8 GB more.
+
+
+2.  CMEMS - the long one (days)
+
+        .venv/bin/python data_download/fetch_cmems.py --products thetao sla sss
+
+    544 files, ~57 GB: 480 thetao (15 depths x 32 years), 32 SLA, 32 SSS.
+
+    The very first file fetched is thetao 0 m for 1993, on purpose - the land
+    mask is built from it and everything downstream needs the mask.
+
+    Ordered year-outer / depth-inner, so completed years are immediately
+    usable. Once a year has all 15 depths you can start preprocessing that
+    year while later years are still downloading.
+
+    To split the work across sessions:
+        --years 1993 1994 1995        one block at a time
+        --products thetao             just the big one
+        --depths 0 5 10               one level at a time
+
+
+3.  ARGO - the independent validation set (hours; run it overnight)
+
+        .venv/bin/python data_download/argo_gdac.py --dry-run
+        .venv/bin/python data_download/argo_gdac.py --years 2023 2024
+
+    Downloads one daily Indian Ocean file at a time, keeps only the profiles
+    inside 5-25 N / 75-100 E, and discards the rest. Output is one compact
+    file per year: data/raw/ARGO/argo_bob_<year>.nc
+
+    BUDGET 2-3 HOURS PER YEAR, not minutes - the GDAC serves these slowly
+    (~20-30 s per daily file, 365 per year, no parallelism). Roughly 1.2 GB
+    crosses the wire per year and a few MB is kept.
+
+    WHICH YEARS YOU ACTUALLY NEED: the test split is 2023-2024, so those are
+    the years that back the headline Argo numbers. 2021-2022 (the default
+    range) cover the validation split. All four are already on disk.
+
+    No credentials needed. This is why the GDAC was chosen over the INCOIS LAS
+    named in the problem statement - the LAS has no stable URL pattern.
+
+    Honest caveat for the report: Argo profiles are assimilated into GLORYS,
+    which is our training target. Argo is independent of the model's INPUTS,
+    but not fully independent of the data the target was built from.
+
+
+4.  VERIFY EVERYTHING (10-30 min)
+
+        .venv/bin/python data_download/verify_downloads.py
+
+    Run this before any preprocessing. It IGNORES the sidecars and re-opens
+    every file from scratch, and it checks three things the downloader cannot
+    check from a header:
+
+        * the time axis is strictly increasing with no gaps or duplicates
+          (a file can hold exactly 365 steps and still be broken)
+        * fields are not entirely NaN
+        * fields are floating point, not silently quantised integers
+
+    Exits non-zero if anything is missing or wrong, and prints exactly which
+    files. Feed those back to the relevant fetch script; it will skip
+    everything already complete.
+
+        --quick             header and time axis only, skips the NaN scan
+        --sources cmems oisst       (the default)
+        --sources currents          only if you downloaded the optional uo/vo
+        --max-report N      cap the number of problems printed (default 25)
+
+
+--------------------------------------------------------------------------------
+  IF SOMETHING GOES WRONG
+--------------------------------------------------------------------------------
+
+"It hangs with no output at all"
+    Almost certainly credentials. If COPERNICUSMARINE_SERVICE_USERNAME or
+    COPERNICUSMARINE_SERVICE_PASSWORD is missing, the client blocks waiting
+    for input instead of failing. Check .env is present at the project root.
+    The scripts load it by explicit path, so the working directory does not
+    matter, but an empty or misnamed variable still stalls.
+
+"N file(s) failed"
+    Just re-run the same command. Completed files are skipped; only the
+    failures are retried. Each file gets 3 attempts with increasing backoff
+    before it is reported.
+
+"Disk is filling up"
+    Check for leftover *.part.nc files - these are cleaned up automatically,
+    but a hard kill (SIGKILL) can leave one behind. They are safe to delete.
+
+"I want to start over for one product"
+    Delete its .ok sidecars; the next run re-fetches and re-validates.
+        rm data/raw2/COPERNICUS_MARINE/sss_*.nc.ok
+
+"Argo is crawling"
+    That is the GDAC, not you. Narrow the range instead of waiting:
+        --years 2023                 one year
+        --start 2023-06-01 --end 2023-08-31     one season, ~45 min
+
+"Can I run the fetches in parallel?"
+    OISST or Argo alongside CMEMS is fine - different servers. Do not run two
+    copies of the same script; they will fight over the same .part files.
+
+
+--------------------------------------------------------------------------------
+  WHAT NOT TO DO
+--------------------------------------------------------------------------------
+
+* Do not point these at data/raw/. The versioned raw2/ directory is what makes
+  every resume gate correct; writing over the old data would reintroduce
+  exactly the silent-mixing failure this design exists to prevent, and would
+  destroy the old dataset needed for the "did the expansion actually help?"
+  comparison. (Argo is the documented exception - it writes to data/raw/ARGO/
+  and was never part of the raw2 domain change.)
+
+* Do not delete data/raw/ until preprocessing of the new data has verified.
+  The OISST reuse hard-links into it, and the old arrays are the A/B baseline.
+
+* Do not start preprocessing before verify_downloads.py exits 0.
+
+
+--------------------------------------------------------------------------------
+  WHAT COMES AFTER
+--------------------------------------------------------------------------------
+
+    .venv/bin/python data_cleaning/pipeline.py --resume
+
+        Phase 1  land mask from GLORYS thetao 0 m
+        Phase 2  per-year regrid onto the 0.25 deg target grid (resume-safe)
+        Phase 3  streaming normalisation stats, training years only
+        Phase 4  splits
+
+    Then the training-side prep, which is where the v3 crop to 75-100 E
+    happens:
+
+        .venv/bin/python training/build_arrays.py
+        .venv/bin/python training/build_climatology.py
+
+    See training/HOW_TO_RUN.txt from there on.
