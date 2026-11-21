@@ -1,4 +1,37 @@
 #!/usr/bin/env python3
+"""
+Final evaluation: per-depth metrics in physical units, baselines, physics stats.
+
+Only run this on test.nc once, with the single model you have already selected
+using val.nc. The test set must stay untouched during tuning, architecture
+selection, hyperparameter selection, and early stopping.
+
+Usage:
+    .venv/bin/python training/evaluate.py --run primary_best --split val
+    .venv/bin/python training/evaluate.py --run primary_best --split test   # ONCE
+
+Reports per depth, in degrees C:
+    RMSE, MAE, BIAS, Pearson r, ANOMALY correlation, skill vs climatology
+
+Anomaly and legacy runs
+-----------------------
+The formulation is read from each run's run_config.json, so pre-anomaly runs
+(absolute targets, plain Adam) still evaluate correctly and remain directly
+comparable. Predictions are always converted back to absolute degC before
+metrics are computed, whichever formulation produced them.
+
+Why anomaly correlation matters
+-------------------------------
+Raw Pearson r comes out around 0.9+ at every depth purely from the seasonal
+cycle and the mean vertical profile. It looks excellent and means nothing. ACC
+removes the per-cell, per-day-of-year climatology (TRAIN split only) and
+correlates the residuals - that is the number that shows real skill.
+
+Baseline
+--------
+The day-of-year climatology. skill = 1 - RMSE_model / RMSE_climatology;
+0 means no better than climatology, negative means worse.
+"""
 
 import argparse
 import json

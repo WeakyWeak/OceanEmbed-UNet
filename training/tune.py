@@ -1,4 +1,36 @@
 #!/usr/bin/env python3
+"""
+KerasTuner Bayesian hyperparameter optimization.
+
+Run training/smoke_test.py first. It is a hard gate: do not start a search
+before all of its checks pass.
+
+Usage:
+    # v3 (the default) - satellite-only, 1993-2024, Bay of Bengal.
+    # Bounded by WALL CLOCK.
+    .venv/bin/python training/tune.py --max-hours 6
+
+    # v1 - the superseded 2005-2022 dataset, only for re-scoring old runs
+    OCEAN_DATASET_VERSION=v1 .venv/bin/python training/tune.py
+
+Objective is val_masked_mse - the DATA term alone, never val_loss.
+lambda_physics is pinned across trials, but val_loss would still fold the
+physics penalty into the number being compared; the data term is what we
+actually care about minimising.
+
+Why --max-hours rather than a trial count
+-----------------------------------------
+Trial cost varies by more than 30% across the search space (2.2 min/epoch at
+base 32 depth 3, 2.9 at base 64 depth 4, measured), and early stopping makes
+the epoch count per trial vary more than that again. A trial COUNT therefore
+does not tell you when the search will finish, which is the thing you actually
+need to know when leaving it overnight.
+
+With a deadline, no NEW trial starts once time is up and the in-flight trial
+is cut off at its next epoch boundary, so it still records a real score
+instead of being lost to a kill. The search is resumable (overwrite=False),
+so an unfinished budget can simply be continued with another --max-hours.
+"""
 
 import argparse
 import json

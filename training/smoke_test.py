@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
 
+"""
+Mandatory pre-flight checks (spec section 7).
+
+All thirteen must pass before any Bayesian search is started. Runs in well under
+a minute and touches only 200 training samples - this is verification, not
+training.
+
+Usage:
+    .venv/bin/python training/smoke_test.py
+"""
+
 import json
 import re
 import sys
