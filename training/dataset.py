@@ -1,3 +1,35 @@
+"""
+Memmapped arrays -> batched (X, Y) tensors, with the anomaly formulation.
+
+Design notes (spec sections 1.3-1.5)
+------------------------------------
+* One contiguous 6574-day record. Splits are defined by the index of the
+  TARGET date, so a val sample at 2021-01-01 naturally pulls its lagged inputs
+  from late December 2020. Those are PAST SURFACE OBSERVATIONS, never future
+  targets - legitimate, but state it in the report.
+* X.npy holds ONE 7-channel copy. The temporal stack is built by indexing at
+  batch time, never materialised on disk.
+* The target validity mask is time-invariant (verified in build_arrays.py) and
+  is baked into the losses and metrics rather than returned per sample.
+
+The anomaly formulation
+-----------------------
+Target: a = (z - clim_z), renormalised to (a - mean)/std per depth. The model
+predicts THAT - 15 channels, unchanged.
+
+y_true carries 30 channels:
+    [...,  :15]  the normalised anomaly target
+    [..., 15:30] that sample's climatology in physical degC
+
+The second half exists only so the physics loss can rebuild absolute
+temperature. Vertical ordering is a statement about ABSOLUTE temperature;
+comparing anomalies between depths is meaningless. Set ANOMALISE_TARGET=False
+for legacy absolute-target runs, and y_true drops back to 15 channels.
+
+Inputs are anomalised per-variable via ANOMALISE_INPUTS. Only `sla` is on by
+default - see train_config.py for the measurements behind that.
+"""
+
 import json
 import sys
 from pathlib import Path

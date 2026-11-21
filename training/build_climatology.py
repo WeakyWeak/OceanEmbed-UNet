@@ -1,5 +1,30 @@
 #!/usr/bin/env python3
 
+"""
+Build the TRAIN day-of-year climatology and the anomaly normalisation stats.
+
+Run once, after build_arrays.py. It reads X.npy / Y.npy and writes:
+
+  clim_X.npy       (367, 81, 101,  7)  float32  input  climatology, z-space
+  clim_Y.npy       (367, 81, 101, 15)  float32  target climatology, z-space
+  anom_stats.json  per-variable anomaly mean/std, plus the degC scale factors
+
+Index 0 is unused; day-of-year runs 1..366.
+
+Computed from the TRAIN split ONLY (2005-2020). Using val or test years here
+would leak the very interannual signal the model is meant to predict.
+
+Smoothing
+---------
+A raw per-day-of-year mean averages only ~16 values, which is noisy. The
+climatology is smoothed circularly across day-of-year with a +/-7 day window,
+so roughly 240 samples sit behind each value. This also smooths over the
+leap-year day-of-year discontinuity at the end of February.
+
+Usage:
+    .venv/bin/python training/build_climatology.py [--force]
+"""
+
 import argparse
 import gc
 import json
