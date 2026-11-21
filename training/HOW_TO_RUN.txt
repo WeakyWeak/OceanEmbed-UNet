@@ -1,0 +1,539 @@
+================================================================================
+  HOW TO RUN THE TRAINING PIPELINE
+  Plain-language guide. Everything runs from the project root.
+================================================================================
+
+Always activate the environment first, or just use the full path as shown:
+
+    .venv/bin/python training/<script>.py
+
+
+--------------------------------------------------------------------------------
+  READ THIS FIRST: WHICH DATASET YOU ARE TRAINING ON
+--------------------------------------------------------------------------------
+
+THERE IS NOTHING TO SET. v3 is the default everywhere - a fresh clone runs
+download, cleaning, training and serving with no environment variable at all.
+
+    v1   2005-2022, Bay of Bengal (81x101), 7 inputs incl. ERA5 winds and
+         GLORYS currents. Superseded - kept only so old runs still score.
+    v2   1993-2024, Bay of Bengal + Arabian Sea (81x201), 5 satellite inputs.
+    v3   1993-2024, Bay of Bengal ONLY (81x101), the same 5 satellite inputs.
+         THE DEFAULT, and what we serve.
+
+Why v3 and not v2: sharing filters across two basins hurt more than the extra
+basin helped. v3 keeps the 32-year record and drops the Arabian Sea. It is not
+a separate download - build_arrays.py just crops v2's record.
+
+The five inputs are sst, sla, sss, ugos, vgos. All satellite observations.
+See docs/dataset_usage.md for where each comes from.
+
+You only need OCEAN_DATASET_VERSION to reach a SUPERSEDED version - re-scoring
+an old run, or reproducing a v1/v2 experiment:
+
+    OCEAN_DATASET_VERSION=v1 .venv/bin/python training/evaluate.py --run primary_best
+
+Setting it to v1 or v2 changes the grid, the inputs and the record together.
+Do not set it globally in your shell profile; put it in front of the one
+command that needs it, so it cannot leak into a later v3 run.
+
+
+--------------------------------------------------------------------------------
+  THE SHORT VERSION - four commands
+--------------------------------------------------------------------------------
+
+  # 1. one-time data prep (only needed once, or after changing the raw data)
+  .venv/bin/python training/build_arrays.py
+  .venv/bin/python training/build_climatology.py
+
+  # 2. check everything works (takes under a minute - ALWAYS run this first)
+  .venv/bin/python training/smoke_test.py
+
+  # 3. search for good settings (hours - run it overnight)
+  .venv/bin/python training/tune.py --project v3_primary
+
+  # 4. train the winner properly, then score it
+  .venv/bin/python training/train.py --tag v3_rm_primary --base-filters 64 --depth 4 \
+        --running-mean-windows 30 90 ...
+  .venv/bin/python training/evaluate.py --run v3_rm_primary --split val
+
+Only touch --split test at the very end, once, on your final chosen model.
+
+
+--------------------------------------------------------------------------------
+  WHAT EACH FILE DOES
+--------------------------------------------------------------------------------
+
+  train_config.py       All the settings. This is the file you edit.
+  build_arrays.py       Converts the NetCDF record into fast .npy arrays, and
+                        applies the v3 crop. Run once.
+  build_climatology.py  Works out the "normal" temperature for each day of the
+                        year, from the training years only. Run once, after
+                        build_arrays.py.
+  splits.py             Turns dates into train/val/test indices. Single source
+                        of truth for the split boundaries - models/ imports it
+                        too, so training and serving cannot disagree.
+  dataset.py            Feeds batches to the model.
+  model.py              The U-Net itself.
+  losses.py             How the model is scored while training.
+  smoke_test.py         Sanity checks. Run before anything expensive.
+  train.py              Trains one model.
+  tune.py               Bayesian search over the settings.
+  evaluate.py           Final scoring, depth by depth, in real degrees C.
+  test_splits.py        Unit tests for splits.py.
+
+  The _att files are the second (attention) model - see its own section below.
+
+  arrays_v3/            Generated data (~5.6 GB, incl. rm30/rm90 at 910 MiB
+                        each). Safe to delete and rebuild.
+                        arrays/ (v1, 4.7 GB) and arrays_v2/ (7.6 GB) are the
+                        older versions.
+  runs/                 Saved models and results. Do NOT delete - old runs live
+                        here, and evaluate.py reads each run's run_config.json.
+
+
+--------------------------------------------------------------------------------
+  THE SPLIT - AND WHY IT IS BY TIME, NOT RANDOM
+--------------------------------------------------------------------------------
+
+  train   1993-2020
+  val     2021-2022        (used for every decision: tuning, ranking,
+                            ensemble weights, uncertainty calibration)
+  test    2023-01-01 .. 2024-12-15     (715 days, looked at once)
+
+Chronological, never random. Neighbouring days in the ocean are almost the same
+field, so a random split would put near-duplicates of the training data into the
+test set and report skill that does not exist.
+
+The first days of the record have no history and are not servable. How many
+depends on the inputs: max(LAGS)=7 for a lag-only model, but 89 once a 90-day
+running mean is in play, because that mean needs 89 days in front of it. With
+the current [30,90] windows the TRAIN split starts at 1993-03-31 and holds
+10,138 days instead of 10,220. Val and test are unaffected - both start in
+2021, nowhere near the record head.
+
+C.required_history() is the authority; do not hardcode either number.
+
+
+--------------------------------------------------------------------------------
+  IMPORTANT: WHAT THE MODEL ACTUALLY PREDICTS
+--------------------------------------------------------------------------------
+
+The model does NOT predict temperature directly. It predicts the DIFFERENCE
+from normal for that day of the year - the "anomaly".
+
+  actual temperature = normal-for-this-date  +  what the model predicts
+
+Why: about 83% of the temperature variation at the surface is just the seasons.
+The seasons are already known, so making the model learn them wastes its effort.
+Removing them lets it concentrate on the part we actually care about.
+
+This is why the label tensor has 30 channels instead of 15:
+    channels  0-14  = the anomaly the model should predict
+    channels 15-29  = the normal-for-this-date values, in degrees C
+
+The second half is only carried along so the physics rule (deeper water should
+be colder) can be checked on real temperatures. THE MODEL STILL OUTPUTS 15
+CHANNELS - that has not changed.
+
+evaluate.py converts everything back to real degrees C, so the numbers it
+prints are directly comparable with the older runs.
+
+
+--------------------------------------------------------------------------------
+  SETTINGS YOU ARE MOST LIKELY TO CHANGE  (all in train_config.py)
+--------------------------------------------------------------------------------
+
+ANOMALISE_INPUTS
+    Which input variables also get the seasons removed. All five are currently
+    True:
+
+        ANOMALISE_INPUTS = {"sst": True, "sla": True, "sss": True,
+                            "ugos": True, "vgos": True}
+        (the dict also still carries the v1-only keys uo/vo/u10/v10; they are
+         ignored under v2/v3 because those variables are not in the record)
+
+    "sla" is the one with direct evidence: turning it off costs about 0.49 R^2
+    at 100 m. DUACS SLA is already called an "anomaly", but it is an anomaly
+    against a fixed 1993-2012 reference and still carries its full seasonal
+    cycle; removing the day-of-year climatology isolates the interannual part
+    that actually tracks the thermocline.
+
+    ugos/vgos are ON by inherited reasoning, not measurement: they are derived
+    from the same SSH field as sla, so they inherit its reference and its
+    seasonal cycle. Re-run the linear probe on the v3 arrays before quoting
+    that as evidence.
+
+    If results get worse, turn "sss" off first - it is 92% seasonal, so what is
+    left over may be mostly product noise.
+
+LAGS
+    Which past days the model can see. Currently [0, 3, 7] = today, 3 days ago,
+    7 days ago.
+
+    Channel count = (len(LAGS) + len(RUNNING_MEAN_WINDOWS)) x 5 inputs
+                    + 1 land + 2 coord + 2 day-of-year:
+        [0]        -> 10 input channels  (no history - the control experiment)
+        [0, 1, 2]  -> 20 channels        (v1's lag choice, kept for comparison)
+        [0, 3, 7]  -> 20 channels        (same width, longer memory)
+        [0, 3, 7] + windows [30, 90] -> 30 channels   (CURRENT)
+
+    Note the two three-lag options cost exactly the same; what changes is how
+    far back the memory reaches, not how wide the tensor is.
+
+    Changing this changes the number of input channels, so it is a separate
+    experiment, not something the tuner searches.
+
+RUNNING_MEAN_WINDOWS
+    Trailing running-mean windows in days, currently [30, 90]. Each window
+    adds one 5-variable block of channels, holding the mean anomaly over the
+    previous W days.
+
+    WHY: [0, 3, 7] spans one week. Satellite altimetry only constrains ocean
+    variability at periods longer than about 20-30 days, so a one-week span
+    sits below the timescale at which sea level carries information about the
+    deep ocean - which is exactly where the model's skill collapses (4% at
+    1000 m). Comparable published work uses 26-31 day windows.
+
+    Measured correlation against the lag-0 anomaly on train days:
+
+                         sst    sla    sss   ugos   vgos
+        lag 7           0.513  0.845  0.707  0.778  0.767
+        rm30            0.622  0.741  0.675  0.638  0.575
+        rm90            0.530  0.534  0.483  0.353  0.298
+
+    rm90 is far more decorrelated from today than the lag-7 block already in
+    the tensor. If you ever have to cut one for memory, drop 30 and KEEP 90 -
+    rm30 is 0.62-0.80 correlated with rm90, so it is the redundant one.
+
+    Setting this to [] restores the 20-channel pipeline exactly and is the
+    escape hatch; the dataset output is then bit-identical to the pre-feature
+    code.
+
+    COSTS, all measured:
+      - rm30.npy and rm90.npy, 910 MiB each, float16, next to X.npy.
+        arrays_v3 goes 3.8 GB -> 5.6 GB. Build takes ~17 s, peak RSS 3.1 GB.
+      - A 90-day window needs 89 days of history in front of a sample, so the
+        TRAIN split loses its first 82 days (10220 -> 10138, 0.80%). Val and
+        test are untouched - both start in 2021, far from the record head.
+      - MEMORY IS THE REAL COST, and it bit us. With both windows the loader's
+        working set is X + Y + rm30 + rm90 ~= 5.4 GiB of page cache, swept
+        randomly every epoch, on a 15 GiB machine whose swap is zram (i.e.
+        compressed pages living in RAM, not on disk). A training run was
+        killed for low memory when a second run started while the first was
+        still tearing down. Do not start two runs back to back; let one exit
+        fully first. If a run dies for memory, set RUNNING_MEAN_WINDOWS = [90]
+        - 25 channels, one array instead of two, and per the correlation table
+        above rm90 is the one carrying the new information anyway.
+
+        Measure it properly if you change this: sample `free -m` across a WHOLE
+        epoch. A spot check in the first minute reports a comfortable figure
+        because the cache has not warmed yet, and is worthless.
+
+    After changing it:
+      -> .venv/bin/python training/build_climatology.py --running-means-only
+      (--force also rebuilds arrays that already exist)
+
+SEARCH_SPACE (v3)
+    The settings tune.py tries:
+        base_filters   24, 32, 48, 64        (model size)
+        depth          3 or 4                (how many down/up steps)
+        learning_rate  0.0003 to 0.005       (log-uniform)
+        dropout        0.1, 0.2, 0.3         (higher = less overfitting)
+        weight_decay   0.00001 to 0.01       (log-uniform, AdamW)
+
+    lambda_physics is pinned at 1e-3, not searched - it was already doing its
+    job and the freed dimension is worth more elsewhere.
+
+    The space is centred where the two previous searches disagreed: v1 (small
+    area, 16 train years) picked the MAXIMUM base_filters offered, v2 (two
+    basins, 28 train years) picked the MINIMUM. v3 is v1's area with v2's
+    years, so the space spans both with a step either side.
+
+BATCH_SIZE
+    16. Only lower it if you run out of GPU memory.
+
+EPOCHS_TUNING / EPOCHS_FINAL
+    30 while searching, 100 for the final run. Early stopping (patience 6 while
+    tuning, 12 final) usually ends it sooner.
+
+
+--------------------------------------------------------------------------------
+  IF YOU CHANGE ANY SETTING - WHAT TO RE-RUN
+--------------------------------------------------------------------------------
+
+  changed ANOMALISE_INPUTS or LAGS or the model settings
+      -> smoke_test.py, then train.py / tune.py.  No need to rebuild arrays.
+
+  changed RUNNING_MEAN_WINDOWS
+      -> .venv/bin/python training/build_climatology.py --running-means-only
+      -> then smoke_test.py, then train/tune.
+      This one DOES need new arrays: each window is its own rm{W}.npy, and the
+      standardisation constants in anom_stats.json are per window. A model
+      already trained on other windows keeps working - its run_config.json
+      records the windows it was trained with and the serving layer rebuilds
+      that exact input, so old and new members can sit in one ensemble.
+
+  changed CLIM_SMOOTH_HALF_WINDOW or ANOMALISE_TARGET
+      -> .venv/bin/python training/build_climatology.py --force
+      -> then smoke_test.py, then train/tune.
+
+  changed anything in data_cleaning/ or re-made the record
+      -> build_arrays.py --force, then build_climatology.py --force, then the rest.
+
+  retrained or replaced a SERVED model
+      -> re-fit the uncertainty band and the embedding basis, and regenerate
+         the frontend tables. See "SERVING" below. Both are calibrated against
+         specific weights and go stale silently otherwise.
+
+
+--------------------------------------------------------------------------------
+  RUNNING THE TUNER - READ THIS BEFORE YOU START IT
+--------------------------------------------------------------------------------
+
+  .venv/bin/python training/tune.py --project v3_primary
+
+USE A NEW --project NAME. The tuner resumes by default, so reusing an old name
+mixes new results in with old ones - and scores are not comparable across
+dataset versions, because v1/v2/v3 are different areas and different year
+ranges.
+
+Project names already used:
+    primary, anom_v1, anom_v2, att_v1, v2_primary, v2_att, v3_primary, v3_att
+
+Under v3 the budget is 30 trials, 30 epochs each, patience 6, with 7 random
+points before the Gaussian process takes over. TUNER_TRIALS is a CAP, not the
+plan - use --max-hours as the real bound, since it stops cleanly on a deadline
+instead of being killed mid-trial:
+
+  .venv/bin/python training/tune.py --project v3_primary --max-hours 6
+
+It is resumable: if you stop it with Ctrl-C, running the same command again
+picks up from the trial it reached.
+
+When it finishes it prints the best settings and writes them to
+    training/runs/tuner/<project>/best_hp.json
+along with the exact train.py command to run next. Copy that command.
+
+
+--------------------------------------------------------------------------------
+  READING THE RESULTS FROM evaluate.py
+--------------------------------------------------------------------------------
+
+It prints one row per depth. The columns that matter:
+
+  rmse_degC       average error in degrees C. Lower is better.
+  bias_degC       is the model too warm (+) or too cold (-) on average?
+                  Should be near zero.
+  skill_vs_clim   the important one. How much better than just guessing the
+                  seasonal average?
+                      0.5  = half the error of the seasonal average - good
+                      0.0  = no better than the seasonal average - useless
+                      < 0  = worse than doing nothing
+  anomaly_corr    does the model get the PATTERN right, ignoring the seasons?
+                  This is the honest measure of skill.
+  pearson_r       will always look great (0.9+) because of the seasons.
+                  Mostly ignore it.
+  anom_sd_ratio   is the model predicting anomalies at the right strength?
+                      ~1.0 = good
+                      0.5  = predicting only half as much variation as reality
+                             (playing it too safe)
+
+At the bottom it prints how often the model puts warmer water below colder
+water. Look at the "gated pairs" line (50 m and deeper): the served ensemble
+violates it on 0.13% of pairs against GLORYS's own 0.47%, so the model is
+actually MORE stably stratified than the target. The "all 14 pairs" line shows
+13.6% (GLORYS 10.9%) and that is FINE - in the Bay of Bengal the top 10-50 m
+really does invert because of river freshwater.
+
+
+--------------------------------------------------------------------------------
+  THE SATELLITE-ONLY ATTENTION MODEL  (_att files)
+--------------------------------------------------------------------------------
+
+This is a SECOND model, not a replacement. Nothing above changes and no
+existing run is touched. Both it and the plain U-Net are served together.
+
+Why it exists, in one paragraph
+  Attention is listed in the problem statement under architectures to use, AND
+  it targets a measured weakness: the plain U-Net is nearly a local filter
+  (50% of its receptive field inside 7x10 px), while the thermocline responds
+  to basin-scale sea level. A one-parameter linear fit on domain-mean SLA
+  recovered ~60% of the 2021 deep warm anomaly where the U-Net recovered ~30%.
+  It also differs from the plain U-Net in architecture, which is exactly what
+  makes averaging the two worth doing.
+
+  (Historical note: the _att files were originally where the satellite-only
+  input set was introduced, back when the main model still used GLORYS uo/vo
+  and ERA5 u10/v10. That distinction is gone - since v2, EVERY model is
+  satellite-only, and the reanalysis inputs were dropped project-wide. An
+  input ablation priced them at about 5% RMSE: the model gets 95% of its skill
+  from SST + SLA + SSS, and SLA alone is worth 75%.)
+
+Files (all suffixed _att so nothing collides with the originals)
+  train_config_att.py   attention settings and search space
+  dataset_att.py        SubsetOceanDataset - picks a subset of the inputs
+  model_att.py          attention U-Net + build_embedding_extractor
+  tune_att.py           Bayesian search
+  train_att.py          final training run
+  smoke_test_att.py     hard gate
+
+How to run it
+  1.  .venv/bin/python training/smoke_test_att.py         # must be all-pass
+  2.  .venv/bin/python training/tune_att.py --project v3_att
+  3.  it prints the exact train_att.py command - run that
+
+  Steps 1 and 2 need nothing rebuilt. build_arrays.py and build_climatology.py
+  outputs are shared; the target, masks, normalisation and splits are all
+  identical, which is what makes the scores comparable with the other runs.
+
+  num_heads [2, 4] is the one attention-specific search dimension. Six
+  dimensions is already more than 30 trials can explore well, so kernel_size
+  and batch_size stay fixed.
+
+The embedding deliverable
+  The problem statement asks for a "Satellite embedding engine capable of
+  learning latent ocean representations". The encoder's deep levels ARE that:
+  surface fields compressed to a compact latent grid from which the decoder
+  rebuilds all 15 levels. models/embedding.py is the production version of
+  this (it serves the 12x14 grid from the plain model's deepest encoder
+  level); build_embedding_extractor in model_att.py is the training-side hook.
+
+Ablation, if a judge asks whether attention earned its place
+      .venv/bin/python training/train_att.py --tag att_no_attn --no-attention
+
+  (The old "--input-vars sst sla sss uo vo u10 v10" ablation is no longer
+   runnable: those four variables are not in the v2/v3 record at all.
+   --input-vars now only accepts the five satellite inputs.)
+
+
+--------------------------------------------------------------------------------
+  THE TWO MODELS WE ACTUALLY SERVE
+--------------------------------------------------------------------------------
+
+  v3_rm_primary     plain U-Net       base_filters 64, depth 4, dropout 0.3,
+                    31,054,095 params  lr 3.87e-4, weight_decay 7.9e-3
+  v3_rm_att         attention U-Net   base_filters 32, depth 4, dropout 0.2,
+                     9,983,091 params  lr 1.50e-3, weight_decay 1.16e-2,
+                                       num_heads 4
+
+Both: lags [0,3,7] PLUS running means [30,90] -> 30 channels, inputs
+sst/sla/sss/ugos/vgos, batch 16, lambda_physics 1e-3.
+
+The hyperparameters are unchanged from the 20-channel runs they replace, and
+that was a measured decision, not laziness. Going 20 -> 30 channels adds 5,760
+parameters to the 31M model (10 channels x 64 filters x 3x3) - 0.019% of it,
+all in the first conv - so the tuned settings still apply. A six-run sweep of
+narrower models, heavier dropout, heavier weight decay and lower learning
+rates failed to beat them; lower LR was distinctly worse.
+
+  v3_primary_best / v3_att_best are the previous 20-channel pair. They still
+  load and still serve; they are just no longer the default.
+
+Averaged with equal weights, on the test split (2023-01-01 .. 2024-12-15):
+
+      RMSE 0.658 degC     bias -0.094     pearson_r 0.824
+      ACC 0.680           skill vs climatology 39.2%
+
+  Per depth, skill vs climatology:
+      surface (0-10 m)   54%        the seasonal cycle is well constrained
+      75-150 m           41-46%     the thermocline - where the real skill is
+      200 m              35%
+      300 m              23%
+      1000 m              2%        NO better than climatology
+
+  Versus the previous 20-channel pair (0.667 / 38.4%), the running-mean
+  channels moved 150m from 37.1 -> 41.3% and 200m from 30.8 -> 35.4%, while
+  1000m went 4.0 -> 2.1%. The windows were added expecting to help at DEPTH;
+  they helped the sub-thermocline instead and made 1000m slightly worse. Bias
+  also worsened (-0.074 -> -0.094), mostly at 100m (-0.211 -> -0.328).
+
+  Say that last line out loud rather than letting a reader assume 1000 m is as
+  good as 100 m. A surface-only reconstruction has most of its business in the
+  upper 200 m, and that is the honest claim.
+
+
+--------------------------------------------------------------------------------
+  SERVING  (models/ and backend/)
+--------------------------------------------------------------------------------
+
+Ensembling models you already have is free and beat every single member. No
+training involved.
+
+  .venv/bin/python models/evaluate.py --split val        # score the ensemble
+  .venv/bin/python models/rank.py                        # rank everything
+  .venv/bin/python models/evaluate.py --members v3_rm_primary v3_rm_att \
+      --split test --out models                          # the final number
+
+Independent Argo validation (needs data_download/argo_gdac.py first):
+
+  .venv/bin/python models/argo_validate.py --split test --out models
+
+Confidence band - split conformal, calibrated on val, coverage measured on
+test. Re-run BOTH after any change to the served models:
+
+  .venv/bin/python models/uncertainty.py fit       # calibrate on val
+  .venv/bin/python models/uncertainty.py check     # measure coverage on test
+
+Latent embedding basis (PCA fitted once on the training period, then frozen):
+
+  .venv/bin/python models/embedding.py fit --split train
+  .venv/bin/python models/embedding.py verify --split test
+
+Static tables the frontend reads:
+
+  .venv/bin/python backend/tools/prep_frontend_assets.py
+  .venv/bin/python backend/tools/prep_frontend_assets.py --skill-only   # no GPU
+
+Run the API:
+
+  .venv/bin/uvicorn backend.main:app --reload --port 8000
+
+  Startup takes ~16 s (model load + XLA warm-up) and /health returns
+  {"status": "loading"} until it is done. ONE worker only. Full details,
+  including every endpoint and the traps that will bite the frontend, are in
+  backend/README.txt.
+
+  NOTE: models/README.txt still describes the older three-member v1 ensemble
+  and its 2005-2022 servable range. backend/README.txt is the current one.
+
+
+--------------------------------------------------------------------------------
+  IF SOMETHING GOES WRONG
+--------------------------------------------------------------------------------
+
+  Everything trained on the wrong data / arrays directory looks wrong
+      OCEAN_DATASET_VERSION is set to v1 or v2, probably left over in the shell
+      from re-scoring an old run. Unset it - the default is v3. See the top.
+
+  "anom_stats.json not found"
+      Run: .venv/bin/python training/build_climatology.py
+
+  Out of GPU memory
+      Lower BATCH_SIZE to 8, or drop 64 from base_filters in SEARCH_SPACE.
+      The GPU has about 4.1 GB usable.
+
+  Loss becomes NaN
+      Training stops itself (TerminateOnNaN). Lower the learning rate.
+      smoke_test.py should catch this before it happens.
+
+  Training stops after 1-2 epochs with the best score at epoch 0
+      That is overfitting - the exact problem this version was built to fix.
+      Raise dropout and weight_decay, lower base_filters.
+
+  Want to stop a long run
+      Ctrl-C. train.py saves a backup each epoch and resumes where it left off.
+
+  Want to score an older model
+      evaluate.py reads each run's run_config.json, so older runs that predicted
+      absolute temperature still score correctly and stay comparable.
+      Example:  .venv/bin/python training/evaluate.py --run primary_best --split val
+      (v1 runs need OCEAN_DATASET_VERSION=v1 - they expect the 7-input arrays.)
+
+
+--------------------------------------------------------------------------------
+  THE ONE RULE
+--------------------------------------------------------------------------------
+
+Do not use --split test until you have picked your final model using val.
+You only get to look at the test set once, or the number stops meaning anything.

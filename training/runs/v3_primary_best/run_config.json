@@ -1,0 +1,45 @@
+{
+  "tag": "v3_primary_best",
+  "input_vars": [
+    "sst",
+    "sla",
+    "sss",
+    "ugos",
+    "vgos"
+  ],
+  "lags": [
+    0,
+    3,
+    7
+  ],
+  "base_filters": 64,
+  "depth": 4,
+  "kernel_size": 3,
+  "dropout": 0.3,
+  "learning_rate": 0.0003868146310752833,
+  "lambda_physics": 0.001,
+  "weight_decay": 0.007902373711581125,
+  "hard_monotonic_below": null,
+  "batch_size": 16,
+  "epochs": 100,
+  "patience": 12,
+  "seed": 42,
+  "n_channels": 20,
+  "params": 31048335,
+  "anomalise_target": true,
+  "anomalise_inputs": {
+    "sst": true,
+    "sla": true,
+    "sss": true,
+    "uo": true,
+    "vo": true,
+    "u10": true,
+    "v10": true,
+    "ugos": true,
+    "vgos": true
+  },
+  "optimizer": "AdamW",
+  "dataset_version": "v3",
+  "n_lat": 81,
+  "n_lon": 101
+}

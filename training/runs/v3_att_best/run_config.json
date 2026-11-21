@@ -1,0 +1,50 @@
+{
+  "tag": "v3_att_best",
+  "lags": [
+    0,
+    3,
+    7
+  ],
+  "input_vars": [
+    "sst",
+    "sla",
+    "sss",
+    "ugos",
+    "vgos"
+  ],
+  "base_filters": 32,
+  "depth": 4,
+  "kernel_size": 3,
+  "dropout": 0.2,
+  "num_heads": 4,
+  "learning_rate": 0.0014986781285010382,
+  "lambda_physics": 0.001,
+  "weight_decay": 0.011561703505930478,
+  "no_attention": false,
+  "no_skip_attention": false,
+  "batch_size": 16,
+  "epochs": 100,
+  "patience": 12,
+  "seed": 42,
+  "n_channels": 20,
+  "params": 9980211,
+  "anomalise_target": true,
+  "anomalise_inputs": {
+    "sst": true,
+    "sla": true,
+    "sss": true,
+    "uo": true,
+    "vo": true,
+    "u10": true,
+    "v10": true,
+    "ugos": true,
+    "vgos": true
+  },
+  "architecture": "attention_unet",
+  "bottleneck_attention": true,
+  "skip_attention": true,
+  "optimizer": "AdamW",
+  "dataset_version": "v3",
+  "n_lat": 81,
+  "n_lon": 101
+}

@@ -1,0 +1,30 @@
+{
+  "overall": {
+    "rmse_degC": 0.6384720078843223,
+    "mae_degC": 0.4176810233693353,
+    "bias_degC": -0.09562291415335324,
+    "mean_abs_bias_degC": 0.13167950480457644,
+    "pearson_r": 0.8081493988115103,
+    "anomaly_corr": 0.5920262490943984,
+    "anom_sd_ratio": 0.6207615991423214,
+    "skill_vs_clim": 0.3560761911763045
+  },
+  "physics": {
+    "pred_gated_pairs": 0.002808412207158805,
+    "truth_gated_pairs": 0.009833182663415199,
+    "pred_all_pairs": 0.1603557967007311,
+    "truth_all_pairs": 0.1344368952118601
+  },
+  "split": "val",
+  "members": [
+    "v3_primary_best"
+  ],
+  "anomalise_target": true,
+  "input_vars": [
+    "sst",
+    "sla",
+    "sss",
+    "ugos",
+    "vgos"
+  ]
+}
