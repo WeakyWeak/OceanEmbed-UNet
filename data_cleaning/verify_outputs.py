@@ -1,4 +1,60 @@
 #!/usr/bin/env python3
+"""
+OceanEmbed - Post-Pipeline Output Verification
+===============================================
+
+Checks ALL outputs from a completed pipeline run without modifying
+any data. Reads lazily from disk (no full-load into RAM).
+
+STATUS: TARGETS THE LEGACY THREE-FILE LAYOUT. READ THIS BEFORE RUNNING.
+----------------------------------------------------------------------
+This script verifies train.nc / val.nc / test.nc. pipeline.py phase 4 no
+longer writes those: since the v2 rebuild it writes ONE record.nc and the
+split is applied at read time by training/splits.py. It also imports OUT_DIR
+from config.py, which now points at data/processed_v2/ - where record.nc
+lives and train.nc does not. So section E onwards WILL report missing files.
+
+It still describes the v1 dataset correctly (data/processed/, 81x101,
+2005-2022, the seven-variable input set below), which is why it is kept
+rather than deleted - that data is still on disk and is the A/B baseline.
+
+To run it against v1, point OUT_DIR at data/processed/. To make it verify the
+current record.nc, sections E1-E8 need retargeting at one file, and F (the
+train/val/test leakage guard) and G (cross-split NaN geography) need
+rewriting against splits.py index ranges rather than separate files - neither
+check is meaningful when there is only one file. That work has not been done.
+
+Sections
+--------
+  A. File inventory & sizes
+  B. Land mask integrity
+  C. Per-year checkpoint checks  (years/2005.nc ... years/2022.nc)
+  D. Normalization stats sanity  (normalization_stats.json)
+  E. Final split checks          (train.nc, val.nc, test.nc)
+     E1. Dimensions & time coverage
+     E2. Variable completeness & dtype
+     E3. Coordinate grid correctness
+     E4. No-NaN in input variables (zero-fill confirmed)
+     E5. Target variables retain NaN (land mask present)
+     E6. Z-score sanity on train.nc (sampled ocean cells; should be ~N(0,1))
+     E7. Time coverage matches expected dates
+     E8. Chronological continuity (no day gaps or duplicates)
+  F. Temporal leakage guard (no date overlap between train/val/test)
+  G. Cross-split NaN geography consistency
+  H. NetCDF encoding (zlib, complevel, float32, unlimited time)
+  I. Deep Value Inspection (full-array NaN, inf, and absurd value checks)
+
+Usage
+-----
+    source .venv/bin/activate
+    python data_cleaning/verify_outputs.py
+
+A PASS/FAIL summary is printed at the end. Script does not raise on
+individual check failures; it collects them and reports at the end.
+Exits 0 on full pass, 1 on any failure.
+
+RAM: loads only small time slices for statistics. Peak << 1 GB.
+"""
 
 import sys
 import os
